@@ -6,7 +6,7 @@ from datetime import datetime
 import time
 
 st.set_page_config(page_title="即時台股股價", layout="wide")
-st.title("📈 大師加持（穩定版）")
+st.title("📈 大師加持（開發版v1）")
 
 stocks = [
     {"id": "2330", "name": "台積電"},
