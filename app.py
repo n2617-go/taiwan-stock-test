@@ -1,11 +1,12 @@
 import streamlit as st
 import requests
-import time
+import yfinance as yf
+import pandas as pd
 from datetime import datetime
+import time
 
 st.set_page_config(page_title="即時台股股價", layout="wide")
-st.title("📈 即時台股股價")
-st.caption("資料來源：TWSE 官方 API（5秒更新） • 台積電、中鋼、台化、台塑化")
+st.title("📈 即時台股股價（穩定版）")
 
 stocks = [
     {"id": "2330", "name": "台積電"},
@@ -14,61 +15,106 @@ stocks = [
     {"id": "6505", "name": "台塑化"}
 ]
 
-def fetch_data():
+# ------------------------
+# TWSE API（主來源）
+# ------------------------
+def fetch_twse():
     ex_ch = "|".join([f"tse_{s['id']}.tw" for s in stocks])
     url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex_ch}&json=1"
-    
+
+    headers = {
+        "User-Agent": "Mozilla/5.0",
+        "Referer": "https://mis.twse.com.tw/"
+    }
+
     try:
-        resp = requests.get(url, timeout=10)
-        data = resp.json()
+        r = requests.get(url, headers=headers, timeout=10)
+        data = r.json()
         return data.get("msgArray", [])
     except:
         return None
 
-if "last_data" not in st.session_state:
-    st.session_state.last_data = None
 
-col1, col2 = st.columns([3, 1])
-with col2:
-    if st.button("🔄 手動刷新", use_container_width=True):
-        st.rerun()
+# ------------------------
+# yfinance（備援）
+# ------------------------
+def fetch_yfinance():
+    result = []
 
-data = fetch_data()
+    for s in stocks:
+        ticker = yf.Ticker(f"{s['id']}.TW")
+        hist = ticker.history(period="1d")
+
+        if not hist.empty:
+            price = hist["Close"].iloc[-1]
+            result.append({
+                "c": s["id"],
+                "n": s["name"],
+                "z": price,
+                "y": price,
+                "v": 0
+            })
+
+    return result
+
+
+# ------------------------
+# 整合資料來源
+# ------------------------
+def get_data():
+    data = fetch_twse()
+
+    if data:
+        return data, "TWSE"
+
+    # fallback
+    data = fetch_yfinance()
+    return data, "yfinance"
+
+
+# ------------------------
+# UI 顯示
+# ------------------------
+data, source = get_data()
+
+rows = []
+
 if data:
-    st.session_state.last_data = data
-
-if st.session_state.last_data:
-    rows = []
-    for stock in st.session_state.last_data:
+    for stock in data:
         code = stock["c"]
         name = stock["n"]
-        price = float(stock.get("z") or 0)
+
+        price_raw = stock.get("z")
         prev = float(stock.get("y") or 0)
-        volume = int(stock.get("v") or 0)
-        
-        is_closed = stock.get("z") in [None, "-", ""]
-        if is_closed or price == 0:
+
+        if price_raw in ["-", "", None]:
             price = prev
-        
+            is_closed = True
+        else:
+            price = float(price_raw)
+            is_closed = False
+
         change = price - prev
         change_pct = (change / prev * 100) if prev else 0
-        
+
         rows.append({
-            "股票名稱": name,
+            "股票": name,
             "代碼": code,
-            "最新價": f"{price:.2f} {'(收盤)' if is_closed else ''}",
+            "價格": f"{price:.2f}" + (" (收盤)" if is_closed else ""),
             "昨收": f"{prev:.2f}",
-            "漲跌": f"{'▲' if change > 0 else '▼'} {change:.2f}",
-            "漲跌幅": f"{change_pct:+.2f}%",
-            "累計成交量": f"{volume:,}"
+            "漲跌": f"{change:+.2f}",
+            "漲跌幅": f"{change_pct:+.2f}%"
         })
-    
-    st.dataframe(rows, use_container_width=True, hide_index=True)
-    
+
+    df = pd.DataFrame(rows)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    st.caption(f"最後更新：{now}（每15秒自動更新）")
+    st.caption(f"資料來源：{source} ｜ 更新時間：{now}")
+
 else:
-    st.error("暫時無法取得資料，請稍後再試")
+    st.error("❌ 無法取得資料（TWSE + yfinance 都失敗）")
+
 
 # 自動刷新
 time.sleep(15)
