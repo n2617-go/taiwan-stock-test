@@ -1,7 +1,5 @@
-streaml
-requests
-yfinance
-pandas
-numpy
-datetime
-time
+streamlit==1.32.0
+requests==2.31.0
+yfinance==0.2.37
+pandas==2.2.1
+numpy==1.26.4
