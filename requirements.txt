@@ -1,7 +1,7 @@
-import streamlit
-import requests
-import yfinance
-import pandas
-import numpy
-import datetime
-import time
+streaml
+requests
+yfinance
+pandas
+numpy
+datetime
+time
