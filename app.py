@@ -7,7 +7,7 @@ from datetime import datetime
 import time
 
 st.set_page_config(page_title="台股看盤神器", layout="wide")
-st.title("📈 台股即時看盤（完整版）")
+st.title("📈 大師版（開發中v1）")
 
 stocks = [
     {"id": "2330", "name": "台積電"},
