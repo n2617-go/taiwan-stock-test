@@ -2,54 +2,58 @@ import streamlit as st
 import requests
 import yfinance as yf
 import pandas as pd
-import numpy as np
 from datetime import datetime
-import time
 
 st.set_page_config(page_title="台股看盤神器 Pro", layout="wide")
 
 st.title("📈 台股看盤神器 Pro")
 
 # ========================
-# ⭐ 自選股（可編輯）
+# ⭐ 自選股初始化（關鍵）
 # ========================
 if "watchlist" not in st.session_state:
-    st.session_state.watchlist = ["2330", "2002", "1326", "6505"]
+    st.session_state.watchlist = ["2330", "2002"]
 
+# ========================
+# ⭐ Sidebar（穩定版）
+# ========================
 st.sidebar.header("⭐ 自選股")
 
-new_stock = st.sidebar.text_input("新增股票代碼")
+# ➕ 新增股票
+new_stock = st.sidebar.text_input("輸入股票代碼（例如 2330）")
 
-if st.sidebar.button("➕ 新增"):
-    if new_stock and new_stock not in st.session_state.watchlist:
-        st.session_state.watchlist.append(new_stock)
+if st.sidebar.button("新增股票"):
+    if new_stock.isdigit():
+        if new_stock not in st.session_state.watchlist:
+            st.session_state.watchlist.append(new_stock)
+    else:
+        st.sidebar.warning("請輸入正確股票代碼")
 
-remove_stock = st.sidebar.selectbox("刪除股票", st.session_state.watchlist)
+# ❌ 刪除股票
+if st.session_state.watchlist:
+    remove_stock = st.sidebar.selectbox("選擇刪除股票", st.session_state.watchlist)
 
-if st.sidebar.button("❌ 刪除"):
-    st.session_state.watchlist.remove(remove_stock)
-
-stocks = [{"id": s, "name": s} for s in st.session_state.watchlist]
+    if st.sidebar.button("刪除股票"):
+        st.session_state.watchlist.remove(remove_stock)
 
 # ========================
-# TWSE 即時
+# TWSE
 # ========================
-def fetch_twse():
-    ex_ch = "|".join([f"tse_{s['id']}.tw" for s in stocks])
+def fetch_twse(stock_ids):
+    ex_ch = "|".join([f"tse_{s}.tw" for s in stock_ids])
     url = f"https://mis.twse.com.tw/stock/api/getStockInfo.jsp?ex_ch={ex_ch}&json=1"
 
-    headers = {"User-Agent": "Mozilla/5.0", "Referer": "https://mis.twse.com.tw/"}
-
     try:
-        r = requests.get(url, headers=headers, timeout=10)
+        r = requests.get(url, timeout=10)
         return r.json().get("msgArray", [])
     except:
         return []
 
 # ========================
-# yfinance
+# yfinance（加強穩定）
 # ========================
-def fetch_yf_hist(stock_id):
+@st.cache_data(ttl=60)
+def fetch_yf(stock_id):
     try:
         df = yf.Ticker(f"{stock_id}.TW").history(period="3mo")
         return df if not df.empty else None
@@ -60,128 +64,64 @@ def fetch_yf_hist(stock_id):
 # 技術指標
 # ========================
 def add_indicators(df):
-    # KD
-    low_min = df['Low'].rolling(9).min()
-    high_max = df['High'].rolling(9).max()
-    rsv = (df['Close'] - low_min) / (high_max - low_min) * 100
-    df['K'] = rsv.ewm(com=2).mean()
-    df['D'] = df['K'].ewm(com=2).mean()
-
-    # Momentum
-    df['Momentum'] = df['Close'] - df['Close'].shift(10)
-
-    # MA
     df['MA5'] = df['Close'].rolling(5).mean()
     df['MA20'] = df['Close'].rolling(20).mean()
 
-    # RSI
     delta = df['Close'].diff()
     gain = delta.clip(lower=0)
     loss = -delta.clip(upper=0)
 
-    avg_gain = gain.rolling(14).mean()
-    avg_loss = loss.rolling(14).mean()
-
-    rs = avg_gain / avg_loss
+    rs = gain.rolling(14).mean() / loss.rolling(14).mean()
     df['RSI'] = 100 - (100 / (1 + rs))
 
     return df
 
 # ========================
-# 訊號判斷（升級版）
-# ========================
-def analyze_signal(df):
-    latest = df.iloc[-1]
-
-    signal = "觀望"
-
-    if latest['K'] > latest['D'] and latest['RSI'] < 70 and latest['MA5'] > latest['MA20']:
-        signal = "🔥 偏多（可觀察買點）"
-
-    elif latest['K'] < latest['D'] and latest['RSI'] > 30 and latest['MA5'] < latest['MA20']:
-        signal = "❄️ 偏空（注意風險）"
-
-    return signal
-
-# ========================
-# 整合
-# ========================
-def get_stock_data(twse_data, stock):
-    code = stock["id"]
-
-    tw = next((x for x in twse_data if x["c"] == code), None)
-    df = fetch_yf_hist(code)
-
-    if df is not None:
-        df = add_indicators(df)
-
-        prev_close = df["Close"].iloc[-2]
-        latest = df.iloc[-1]
-
-        price = float(tw["z"]) if tw and tw.get("z") not in ["-", ""] else latest["Close"]
-
-        return {
-            "code": code,
-            "price": price,
-            "prev_close": prev_close,
-            "volume": latest["Volume"],
-            "K": latest["K"],
-            "D": latest["D"],
-            "RSI": latest["RSI"],
-            "MA5": latest["MA5"],
-            "MA20": latest["MA20"],
-            "signal": analyze_signal(df)
-        }
-
-    return None
-
-# ========================
 # 主流程
 # ========================
-twse_data = fetch_twse()
+twse_data = fetch_twse(st.session_state.watchlist)
 
-data_list = []
-for s in stocks:
-    d = get_stock_data(twse_data, s)
-    if d:
-        data_list.append(d)
+st.subheader("📊 即時看盤")
 
-# ========================
-# 🎨 卡片 UI
-# ========================
-st.markdown("""
-<style>
-.card {
-    padding: 16px;
-    border-radius: 16px;
-    background: #111;
-    margin-bottom: 12px;
-}
-.red { color: #ff4b4b; }
-.green { color: #00c853; }
-</style>
-""", unsafe_allow_html=True)
+for code in st.session_state.watchlist:
 
-for row in data_list:
-    change = row["price"] - row["prev_close"]
+    df = fetch_yf(code)
+
+    if df is None:
+        st.error(f"{code} 讀取失敗")
+        continue
+
+    df = add_indicators(df)
+
+    latest = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    price = latest["Close"]
+    change = price - prev["Close"]
+
     color = "red" if change > 0 else "green"
 
     st.markdown(f"""
-    <div class="card">
-        <h3>{row['code']}</h3>
-        <h2 class="{color}">{row['price']:.2f}</h2>
+    <div style="
+        padding:15px;
+        border-radius:12px;
+        background:#111;
+        margin-bottom:10px;
+    ">
+        <h3>{code}</h3>
+        <h2 style="color:{'red' if change>0 else 'green'}">
+            {price:.2f}
+        </h2>
 
-        📊 成交量：{int(row['volume']):,}<br>
-        MA5：{row['MA5']:.2f} ｜ MA20：{row['MA20']:.2f}<br>
-        RSI：{row['RSI']:.2f}<br>
-        K：{row['K']:.2f} ｜ D：{row['D']:.2f}<br>
-
-        🚦 {row['signal']}
+        📊 成交量：{int(latest['Volume']):,}<br>
+        MA5：{latest['MA5']:.2f} ｜ MA20：{latest['MA20']:.2f}<br>
+        RSI：{latest['RSI']:.2f}
     </div>
     """, unsafe_allow_html=True)
 
-# 更新時間
+# ========================
+# 更新時間 + 自動刷新（正確寫法）
+# ========================
 st.caption(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
-time.sleep(15)
-st.rerun()
+st.autorefresh(interval=15000, key="refresh")
