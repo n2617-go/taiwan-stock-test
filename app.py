@@ -6,72 +6,8 @@ import numpy as np
 from datetime import datetime
 import time
 
-st.set_page_config(page_title="大師加持開發版v2", layout="wide")
-
-# ------------------------
-# 🌙 深色主題 + 卡片樣式
-# ------------------------
-st.markdown("""
-<style>
-html, body, [class*="css"] {
-    background-color: #0e1117;
-    color: #e6edf3;
-}
-
-/* 卡片 */
-.card {
-    background: #161b22;
-    padding: 20px;
-    border-radius: 16px;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
-    margin-bottom: 20px;
-}
-
-/* 標題 */
-.card-title {
-    font-size: 20px;
-    font-weight: bold;
-}
-
-/* 價格 */
-.price {
-    font-size: 28px;
-    font-weight: bold;
-}
-
-/* 上漲 */
-.up {
-    color: #ff4d4f;
-}
-
-/* 下跌 */
-.down {
-    color: #52c41a;
-}
-
-/* badge */
-.badge {
-    padding: 6px 10px;
-    border-radius: 10px;
-    font-size: 12px;
-    display: inline-block;
-    margin-right: 6px;
-}
-
-/* 技術指標 */
-.kd {
-    background-color: #1f6feb;
-}
-.momentum {
-    background-color: #d29922;
-}
-.signal {
-    background-color: #8957e5;
-}
-</style>
-""", unsafe_allow_html=True)
-
-st.title("📈 大師加持（開發版 v2 UI升級）")
+st.set_page_config(page_title="大師加持開發版", layout="wide")
+st.title("📈 大師加持開發版（v1版）")
 
 stocks = [
     {"id": "2330", "name": "台積電"},
@@ -97,7 +33,7 @@ def fetch_twse():
         data = r.json()
         return data.get("msgArray", [])
     except:
-        return []
+        return None
 
 
 # ------------------------
@@ -107,8 +43,10 @@ def fetch_yf_hist(stock_id):
     try:
         ticker = yf.Ticker(f"{stock_id}.TW")
         df = ticker.history(period="3mo")
+
         if df.empty:
             return None
+
         return df
     except:
         return None
@@ -166,8 +104,10 @@ def get_stock_data(twse_data, stock):
     code = stock["id"]
     name = stock["name"]
 
+    # 找 TWSE
     tw = next((x for x in twse_data if x["c"] == code), None)
 
+    # yfinance 歷史
     df = fetch_yf_hist(code)
 
     if df is not None and len(df) >= 2:
@@ -179,7 +119,7 @@ def get_stock_data(twse_data, stock):
     else:
         prev_close = open_price = high = low = yf_close = None
 
-    # 即時價優先 TWSE
+    # 即時價（優先 TWSE）
     if tw:
         z = tw.get("z")
         if z not in ["-", "", None]:
@@ -191,17 +131,13 @@ def get_stock_data(twse_data, stock):
 
     # fallback
     if prev_close is None and tw:
-        try:
-            prev_close = float(tw.get("y") or 0)
-        except:
-            prev_close = 0
+        prev_close = float(tw.get("y") or 0)
 
     # 技術指標
     if df is not None:
         df = calculate_kd(df)
         df = calculate_momentum(df)
         signal, trend = analyze_signal(df)
-
         latest = df.iloc[-1]
         k = latest["K"]
         d = latest["D"]
@@ -234,101 +170,59 @@ def get_stock_data(twse_data, stock):
 # ------------------------
 # 主流程
 # ------------------------
-twse_data = fetch_twse()
+twse_data = fetch_twse() or []
 
 rows = []
+
 for s in stocks:
-    rows.append(get_stock_data(twse_data, s))
+    data = get_stock_data(twse_data, s)
+    rows.append(data)
 
 df = pd.DataFrame(rows)
 
 # ------------------------
-# 📊 卡片 UI（報價）
+# UI 顯示
 # ------------------------
 st.subheader("📊 即時報價")
 
-cols = st.columns(2)
+st.dataframe(
+    df[[
+        "name", "code", "price", "prev_close",
+        "change", "change_pct", "open", "high", "low"
+    ]].rename(columns={
+        "name": "股票",
+        "code": "代碼",
+        "price": "最新價",
+        "prev_close": "昨收",
+        "change": "漲跌",
+        "change_pct": "漲跌幅",
+        "open": "開盤",
+        "high": "最高",
+        "low": "最低"
+    }),
+    use_container_width=True,
+    hide_index=True
+)
 
-for i, row in df.iterrows():
-    col = cols[i % 2]
+st.divider()
 
-    change_class = "up" if row["change"] > 0 else "down"
-
-    with col:
-        st.markdown(f"""
-        <div class="card">
-            <div class="card-title">
-                {row['name']} ({row['code']})
-            </div>
-
-            <div class="price {change_class}">
-                {row['price']:.2f}
-            </div>
-
-            <div class="{change_class}">
-                {row['change']:.2f} ({row['change_pct']:.2f}%)
-            </div>
-
-            <hr>
-
-            📌 開盤：{row['open']}　
-            最高：{row['high']}　
-            最低：{row['low']}
-
-        </div>
-        """, unsafe_allow_html=True)
-
-# ------------------------
-# 📈 技術分析卡片
-# ------------------------
 st.subheader("📈 技術分析")
 
 for _, row in df.iterrows():
+    st.write(f"### {row['name']} ({row['code']})")
 
-    change_class = "up" if row["change"] > 0 else "down"
+    if row["K"] is not None:
+        st.write(f"K值：{row['K']:.2f} ｜ D值：{row['D']:.2f}")
+        st.write(f"動能：{row['Momentum']:.2f}")
+    else:
+        st.write("技術資料不足")
 
-    k_val = f"{row['K']:.2f}" if row["K"] is not None else "-"
-    d_val = f"{row['D']:.2f}" if row["D"] is not None else "-"
-    m_val = f"{row['Momentum']:.2f}" if row["Momentum"] is not None else "-"
+    st.write(f"訊號：{row['signal']} ｜ {row['trend']}")
+    st.divider()
 
-    st.markdown(f"""
-    <div class="card">
-        <div class="card-title">
-            {row['name']} ({row['code']})
-        </div>
-
-        <div>
-            <span class="badge kd">K: {k_val}</span>
-            <span class="badge kd">D: {d_val}</span>
-            <span class="badge momentum">動能: {m_val}</span>
-        </div>
-
-        <br>
-
-        <div class="badge signal">
-            {row['signal']}
-        </div>
-
-        <div style="margin-top:10px;" class="{change_class}">
-            {row['trend']}
-        </div>
-
-    </div>
-    """, unsafe_allow_html=True)
-
-# ------------------------
-# 更新時間
-# ------------------------
 now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+st.caption(f"更新時間：{now}")
 
-st.markdown(f"""
-<div style="text-align:right; color:gray;">
-🕒 更新時間：{now}
-</div>
-""", unsafe_allow_html=True)
-
-# ------------------------
 # 自動刷新
-# ------------------------
 time.sleep(15)
 st.rerun()
